@@ -20,12 +20,21 @@ def transcribe_audio(audio_file) -> str:
     return response.text
 
 def get_chatbot_response(messages: list) -> str:
-    """Get the next chat response from GPT-4o."""
+    """Get the next chat response from GPT-4o-mini."""
     response = openai.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=messages
     )
     return response.choices[0].message.content
+
+def get_chatbot_response_stream(messages: list):
+    """Get the next chat response from GPT-4o-mini as a stream."""
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        stream=True
+    )
+    return response
 
 def extract_user_information(history: list) -> dict:
     """Extract information from the chat history and return as a JSON dictionary."""

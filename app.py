@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 
 from utils.prompts import GROOM_PROMPT, BRIDE_PROMPT
-from utils.llm import generate_audio, transcribe_audio, get_chatbot_response, extract_user_information
+from utils.llm import generate_audio, transcribe_audio, get_chatbot_response, get_chatbot_response_stream, extract_user_information
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -95,26 +95,30 @@ else:
             
             # 2. Get bot response
             with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        # Build context
-                        system_msg = [{"role": "system", "content": st.session_state.active_prompt}]
-                        context = [{"role": m["role"], "content": m["content"]} for m in st.session_state.history]
-                        messages = system_msg + context
-                        
-                        bot_response_text = get_chatbot_response(messages)
+                try:
+                    # Build context
+                    system_msg = [{"role": "system", "content": st.session_state.active_prompt}]
+                    context = [{"role": m["role"], "content": m["content"]} for m in st.session_state.history]
+                    messages = system_msg + context
+                    
+                    # Visually stream the text response first
+                    stream = get_chatbot_response_stream(messages)
+                    bot_response_text = st.write_stream(stream)
+                    
+                    # Then quickly generate the voice
+                    with st.spinner("Preparing voice..."):
                         bot_audio = generate_audio(bot_response_text, st.session_state.voice)
-                        
-                        # Add bot message to history
-                        st.session_state.history.append({
-                            "role": "assistant",
-                            "content": bot_response_text,
-                            "audio": bot_audio,
-                            "autoplay": True
-                        })
-                        
-                    except Exception as e:
-                        st.error(f"Error generating AI response: {e}")
+                    
+                    # Add bot message to history
+                    st.session_state.history.append({
+                        "role": "assistant",
+                        "content": bot_response_text,
+                        "audio": bot_audio,
+                        "autoplay": True
+                    })
+                    
+                except Exception as e:
+                    st.error(f"Error generating AI response: {e}")
             
             # Increment the audio key to reset the input widget
             st.session_state.audio_key += 1
