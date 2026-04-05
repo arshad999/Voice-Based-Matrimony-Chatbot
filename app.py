@@ -52,130 +52,167 @@ IMPORTANT GUIDELINES:
 - Sometimes acknowledge what they said before moving forward - create continuity in the chat.
 """
 
-st.title("Voice-Based Matrimony Chatbot")
+# Helper Functions
+def generate_audio(text: str, voice: str) -> bytes:
+    """Generate audio bytes using OpenAI TTS."""
+    response = openai.audio.speech.create(
+        model="tts-1",
+        voice=voice,
+        input=text
+    )
+    return response.content
 
-# Select persona
-persona = st.selectbox("Select Persona", ["Groom", "Bride"])
-st.session_state.persona = persona
+def transcribe_audio(audio_file) -> str:
+    """Transcribe user audio to text using Whisper."""
+    response = openai.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file
+    )
+    return response.text
 
-if st.button("Start Conversation"):
-    st.session_state.history = []
-    st.session_state.user_data = {}
-
-    # Generate introduction
-    prompt = groom_prompt if st.session_state.persona == "Groom" else bride_prompt
-    intro_messages = [{"role": "system", "content": prompt + "\nIntroduce yourself naturally as if starting a marriage meeting conversation. Keep it short and friendly."}]
-    intro_response = openai.chat.completions.create(
+def get_chatbot_response(messages: list) -> str:
+    """Get the next chat response from GPT-4o."""
+    response = openai.chat.completions.create(
         model="gpt-4o",
-        messages=intro_messages
-    ).choices[0].message.content
+        messages=messages
+    )
+    return response.choices[0].message.content
 
-    st.session_state.history.append({"role": "assistant", "content": intro_response})
-
-    # TTS for intro
+def extract_user_information(history: list) -> dict:
+    """Extract information from the chat history and return as a JSON dictionary."""
+    extract_prompt = """
+    From the conversation, extract the following user information if mentioned:
+    - name
+    - age
+    - location
+    - profession
+    - salary
+    - education
+    - family_details
+    - hobbies
+    - preferences (partner expectations)
+    
+    Output as ONLY a valid JSON object. If a field is not mentioned, use null for it.
+    Ensure all extracted information is in English; translate any Hinglish or non-English text to English.
+    """
+    # format history for context
+    context = [{"role": m["role"], "content": m["content"]} for m in history]
+    
+    messages = [{"role": "system", "content": extract_prompt}] + context
+    
+    response = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        response_format={"type": "json_object"}
+    )
+    
+    content = response.choices[0].message.content
     try:
-        voice = "onyx" if st.session_state.persona == "Groom" else "nova"
-        tts_response = openai.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=intro_response
-        )
-        audio_bytes = b""
-        for chunk in tts_response.iter_bytes():
-            audio_bytes += chunk
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return {"error": "Failed to parse JSON", "raw": content}
 
-        st.audio(audio_bytes, format="audio/mp3")
-    except Exception as e:
-        st.error(f"Error generating voice for introduction: {e}")
-    # st.write(f"Bot: {intro_response}")  # Removed text display for voice focus
+# Main UI
+st.set_page_config(page_title="Voice-Based Matrimony Chatbot", page_icon="💍", layout="centered")
+st.title("💍 Voice-Based Matrimony Chatbot")
 
-# Display chat history
-if "history" in st.session_state:
-    st.subheader("Conversation")
-    for msg in st.session_state.history:
-        if msg["role"] == "user":
-            st.write(f"**You:** {msg['content']}")
-        else:
-            st.write(f"**Bot:** {msg['content']}")
-
-# Audio input
-audio_input = st.audio_input("Speak your message")
-
-if audio_input is not None:
-    # Transcribe audio
-    try:
-        transcript = openai.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_input
-        ).text
-        st.write(f"You said: {transcript}")
-    except Exception as e:
-        st.error(f"Error transcribing audio: {e}")
-        transcript = ""  # or continue
-
-    if transcript:
-        # Add to history
-        if "history" not in st.session_state:
-            st.session_state.history = []
-        st.session_state.history.append({"role": "user", "content": transcript})
-
-        # Get bot response
-        try:
-            prompt = groom_prompt if st.session_state.persona == "Groom" else bride_prompt
-            messages = [{"role": "system", "content": prompt}] + st.session_state.history
-            response = openai.chat.completions.create(
-                model="gpt-4o",  # Use latest GPT model
-                messages=messages
-            ).choices[0].message.content
-
-            st.session_state.history.append({"role": "assistant", "content": response})
-
-            # Text-to-Speech
+# Sidebar for controls
+with st.sidebar:
+    st.header("Settings")
+    persona = st.selectbox("Select Persona", ["Groom", "Bride"])
+    
+    if st.button("Start / Reset Conversation", use_container_width=True):
+        st.session_state.history = []
+        st.session_state.persona = persona
+        st.session_state.voice = "onyx" if persona == "Groom" else "nova"
+        st.session_state.active_prompt = groom_prompt if persona == "Groom" else bride_prompt
+        
+        # Generate intro
+        with st.spinner("Generating introduction..."):
+            intro_messages = [{"role": "system", "content": st.session_state.active_prompt + "\nIntroduce yourself naturally as if starting a marriage meeting conversation. Keep it short and friendly."}]
             try:
-                voice = "onyx" if st.session_state.persona == "Groom" else "nova"
-                tts_response = openai.audio.speech.create(
-                    model="tts-1",
-                    voice=voice,
-                    input=response
-                )
-                audio_bytes = b""
-                for chunk in tts_response.iter_bytes():
-                    audio_bytes += chunk
-
-                st.audio(audio_bytes, format="audio/mp3")
+                intro_text = get_chatbot_response(intro_messages)
+                intro_audio = generate_audio(intro_text, st.session_state.voice)
+                
+                st.session_state.history.append({
+                    "role": "assistant",
+                    "content": intro_text,
+                    "audio": intro_audio
+                })
             except Exception as e:
-                st.error(f"Error generating voice response: {e}")
-        except Exception as e:
-            st.error(f"Error generating bot response: {e}")
-    # st.write(f"Bot: {response}")  # Removed text display for voice focus
+                st.error(f"Failed to start conversation: {e}")
+        st.rerun()
 
-# Extract data
-if st.button("Extract User Information"):
-    if "history" in st.session_state and st.session_state.history:
-        extract_prompt = """
-        From the conversation, extract the following user information if mentioned:
-        - name
-        - age
-        - location
-        - profession
-        - salary
-        - education
-        - family_details
-        - hobbies
-        - preferences (partner expectations)
-        Output as a valid JSON object. If not mentioned, use null.
-        Ensure all extracted information is in English; translate any Hinglish or non-English text to English.
-        """
-        messages = [{"role": "system", "content": extract_prompt}] + st.session_state.history
-        extract_response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        ).choices[0].message.content
-        try:
-            data = json.loads(extract_response)
-            st.json(data)
-        except:
-            st.write("Failed to parse JSON. Raw response:")
-            st.write(extract_response)
-    else:
-        st.write("No conversation history to extract from.")
+    st.divider()
+    if st.button("Extract User Information", use_container_width=True):
+        if "history" in st.session_state and len(st.session_state.history) > 0:
+            with st.spinner("Extracting..."):
+                extracted_data = extract_user_information(st.session_state.history)
+            st.json(extracted_data)
+        else:
+            st.warning("No conversation history to extract from.")
+
+# Main Chat Interface
+if "history" not in st.session_state:
+    st.info("👈 Please start a conversation from the sidebar.")
+else:
+    # Display chat history
+    for msg in st.session_state.history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if "audio" in msg and msg["audio"] is not None:
+                st.audio(msg["audio"], format="audio/mp3")
+
+    # Audio input at the bottom
+    if "audio_key" not in st.session_state:
+        st.session_state.audio_key = 0
+
+    audio_input = st.audio_input("Speak your message", key=f"audio_{st.session_state.audio_key}")
+
+    if audio_input is not None:
+        with st.spinner("Transcribing..."):
+            try:
+                transcript = transcribe_audio(audio_input)
+            except Exception as e:
+                st.error(f"Error transcribing audio: {e}")
+                transcript = None
+        
+        if transcript:
+            # 1. Add user message to history
+            st.session_state.history.append({
+                "role": "user",
+                "content": transcript
+            })
+            
+            # Show the user message immediately
+            with st.chat_message("user"):
+                st.markdown(transcript)
+            
+            # 2. Get bot response
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        # Build context
+                        system_msg = [{"role": "system", "content": st.session_state.active_prompt}]
+                        context = [{"role": m["role"], "content": m["content"]} for m in st.session_state.history]
+                        messages = system_msg + context
+                        
+                        bot_response_text = get_chatbot_response(messages)
+                        bot_audio = generate_audio(bot_response_text, st.session_state.voice)
+                        
+                        # Add bot message to history
+                        st.session_state.history.append({
+                            "role": "assistant",
+                            "content": bot_response_text,
+                            "audio": bot_audio
+                        })
+                        
+                        st.markdown(bot_response_text)
+                        st.audio(bot_audio, format="audio/mp3")
+                        
+                    except Exception as e:
+                        st.error(f"Error generating AI response: {e}")
+            
+            # Increment the audio key to reset the input widget
+            st.session_state.audio_key += 1
+            st.rerun()
