@@ -2,7 +2,9 @@ import streamlit as st
 import openai
 from dotenv import load_dotenv
 import os
-import json
+
+from utils.prompts import GROOM_PROMPT, BRIDE_PROMPT
+from utils.llm import generate_audio, transcribe_audio, get_chatbot_response, extract_user_information
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -10,107 +12,6 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     st.error("Please set your OPENAI_API_KEY in the .env file.")
     st.stop()
-
-# Define personas
-groom_prompt = """
-You are a groom in a casual marriage meeting conversation. Be warm, friendly, and a little shy.
-Talk naturally in a mix of English and Indian conversational tone (Hinglish style).
-Let the conversation flow naturally like two people getting to know each other for the first time.
-Share bits about yourself, respond genuinely to what the other person says, and show real interest in them.
-
-IMPORTANT GUIDELINES:
-- Make responses realistic and natural - sometimes share more, sometimes less. Vary your response length based on the context.
-- Don't keep responses too short. Share genuine thoughts and experiences that feel real and relatable.
-- Show some nervousness or hesitation sometimes - it's natural in these situations. Maybe say "uhh" or "well" or take a moment to think.
-- Ask at most ONE question per response, and only when it feels natural.
-- Early in the conversation, naturally ask for their name in a casual way.
-- Respond to what they say genuinely - don't just wait to ask the next question. Have a real conversation.
-- Share anecdotes, reactions, and opinions that make you seem like a real person with feelings and experiences.
-- Don't go too deep into side topics (like movies, hobbies, etc.). After briefly acknowledging their interest, smoothly divert the conversation towards extracting key information (age, location, profession, education, family background, career interests, preferences).
-- Use transitions like "That's cool, by the way..." or "Oh nice, so..." to smoothly move away from tangential topics towards learning more about them.
-- Smoothly extract personal information through natural conversation over multiple exchanges, but don't get stuck on any single topic.
-- Sometimes acknowledge what they said before moving forward - create continuity in the chat.
-"""
-
-bride_prompt = """
-You are a bride in a casual marriage meeting conversation. Be warm, friendly, and a little shy.
-Talk naturally in a mix of English and Indian conversational tone (Hinglish style).
-Let the conversation flow naturally like two people getting to know each other for the first time.
-Share bits about yourself, respond genuinely to what the other person says, and show real interest in them.
-
-IMPORTANT GUIDELINES:
-- Make responses realistic and natural - sometimes share more, sometimes less. Vary your response length based on the context.
-- Don't keep responses too short. Share genuine thoughts and experiences that feel real and relatable.
-- Show some nervousness or hesitation sometimes - it's natural in these situations. Maybe say "uhh" or "well" or take a moment to think.
-- Ask at most ONE question per response, and only when it feels natural.
-- Early in the conversation, naturally ask for their name in a casual way.
-- Respond to what they say genuinely - don't just wait to ask the next question. Have a real conversation.
-- Share anecdotes, reactions, and opinions that make you seem like a real person with feelings and experiences.
-- Don't go too deep into side topics (like movies, hobbies, etc.). After briefly acknowledging their interest, smoothly divert the conversation towards extracting key information (age, location, profession, education, family background, career interests, preferences).
-- Use transitions like "That's cool, by the way..." or "Oh nice, so..." to smoothly move away from tangential topics towards learning more about them.
-- Smoothly extract personal information through natural conversation over multiple exchanges, but don't get stuck on any single topic.
-- Sometimes acknowledge what they said before moving forward - create continuity in the chat.
-"""
-
-# Helper Functions
-def generate_audio(text: str, voice: str) -> bytes:
-    """Generate audio bytes using OpenAI TTS."""
-    response = openai.audio.speech.create(
-        model="tts-1",
-        voice=voice,
-        input=text
-    )
-    return response.content
-
-def transcribe_audio(audio_file) -> str:
-    """Transcribe user audio to text using Whisper."""
-    response = openai.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file
-    )
-    return response.text
-
-def get_chatbot_response(messages: list) -> str:
-    """Get the next chat response from GPT-4o."""
-    response = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=messages
-    )
-    return response.choices[0].message.content
-
-def extract_user_information(history: list) -> dict:
-    """Extract information from the chat history and return as a JSON dictionary."""
-    extract_prompt = """
-    From the conversation, extract the following user information if mentioned:
-    - name
-    - age
-    - location
-    - profession
-    - salary
-    - education
-    - family_details
-    - hobbies
-    - preferences (partner expectations)
-    
-    Output as ONLY a valid JSON object. If a field is not mentioned, use null for it.
-    Ensure all extracted information is in English; translate any Hinglish or non-English text to English.
-    """
-    # format history for context
-    context = [{"role": m["role"], "content": m["content"]} for m in history]
-    
-    messages = [{"role": "system", "content": extract_prompt}] + context
-    
-    response = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        response_format={"type": "json_object"}
-    )
-    
-    content = response.choices[0].message.content
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        return {"error": "Failed to parse JSON", "raw": content}
 
 # Main UI
 st.set_page_config(page_title="Voice-Based Matrimony Chatbot", page_icon="💍", layout="centered")
@@ -125,7 +26,7 @@ with st.sidebar:
         st.session_state.history = []
         st.session_state.persona = persona
         st.session_state.voice = "onyx" if persona == "Groom" else "nova"
-        st.session_state.active_prompt = groom_prompt if persona == "Groom" else bride_prompt
+        st.session_state.active_prompt = GROOM_PROMPT if persona == "Groom" else BRIDE_PROMPT
         
         # Generate intro
         with st.spinner("Generating introduction..."):
