@@ -38,7 +38,8 @@ with st.sidebar:
                 st.session_state.history.append({
                     "role": "assistant",
                     "content": intro_text,
-                    "audio": intro_audio
+                    "audio": intro_audio,
+                    "autoplay": True
                 })
             except Exception as e:
                 st.error(f"Failed to start conversation: {e}")
@@ -62,7 +63,10 @@ else:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if "audio" in msg and msg["audio"] is not None:
-                st.audio(msg["audio"], format="audio/mp3")
+                autoplay = msg.get("autoplay", False)
+                st.audio(msg["audio"], format="audio/mp3", autoplay=autoplay)
+                if autoplay:
+                    msg["autoplay"] = False
 
     # Audio input at the bottom
     if "audio_key" not in st.session_state:
@@ -105,11 +109,9 @@ else:
                         st.session_state.history.append({
                             "role": "assistant",
                             "content": bot_response_text,
-                            "audio": bot_audio
+                            "audio": bot_audio,
+                            "autoplay": True
                         })
-                        
-                        st.markdown(bot_response_text)
-                        st.audio(bot_audio, format="audio/mp3")
                         
                     except Exception as e:
                         st.error(f"Error generating AI response: {e}")
