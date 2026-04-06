@@ -3,6 +3,7 @@ import openai
 from dotenv import load_dotenv
 import os
 import base64
+import time
 
 import streamlit.components.v1 as components
 import uuid
@@ -94,6 +95,7 @@ with st.sidebar:
     if st.button("Start / Reset Call", use_container_width=True):
         st.session_state.history = []
         st.session_state.persona = persona
+        st.session_state.call_start_time = time.time()
         
         st.session_state.voice = "onyx" if persona == "Groom" else "nova"
         st.session_state.active_prompt = GROOM_PROMPT if persona == "Groom" else BRIDE_PROMPT
@@ -134,13 +136,52 @@ else:
     # 1. Render the Phone Call screen
     persona_emoji = "👨" if st.session_state.persona == "Groom" else "👩"
     
+    start_t = st.session_state.get("call_start_time", time.time())
+    iframe_srcdoc = f"""
+    <html>
+    <head>
+        <style>
+            body {{
+                margin: 0; padding: 0; text-align: center;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                font-weight: 600; font-size: 1.1rem; letter-spacing: 1px;
+                color: #4CAF50; overflow: hidden; background: transparent;
+            }}
+        </style>
+    </head>
+    <body>
+        <div id='timer'>Connected &bull; 00:00</div>
+        <script>
+            var start = {start_t};
+            function update() {{
+                var e = Math.floor(Date.now() / 1000 - start);
+                var m = Math.floor(e / 60).toString().padStart(2, '0');
+                var s = (e % 60).toString().padStart(2, '0');
+                document.getElementById('timer').innerHTML = 'Connected &bull; ' + m + ':' + s;
+            }}
+            setInterval(update, 1000);
+            update();
+        </script>
+    </body>
+    </html>
+    """.replace('"', '&quot;')
+    
     st.markdown(f"""
     <div class="phone-container">
         <div style="color: #888; font-size: 0.9rem; margin-bottom: 20px; font-weight: bold;">SECURE CALL</div>
         <div class="avatar">{persona_emoji}</div>
-        <div class="status">Connected • Active</div>
+        <iframe srcdoc="{iframe_srcdoc}" style="border:none; width:100%; height:30px; background: transparent;" scrolling="no" allowtransparency="true"></iframe>
     </div>
     """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        def end_call():
+            if "history" in st.session_state:
+                del st.session_state["history"]
+            if "call_start_time" in st.session_state:
+                del st.session_state["call_start_time"]
+        st.button("📞 End Call", use_container_width=True, type="primary", on_click=end_call)
 
     # 2. Process most recent subtitles
     recent_bot = ""
