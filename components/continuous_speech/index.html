@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body { margin: 0; overflow: hidden; font-family: sans-serif; color: #555; background: transparent; font-size: 11px; }
+      #mic-status { text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div id="mic-status">Microphone Initializing...</div>
+    <script>
+      // Native Streamlit Component Bi-directional Message API Polyfill
+      const Streamlit = {
+          setComponentReady: function() {
+              window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+          },
+          setFrameHeight: function(height) {
+              window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: height}, "*");
+          },
+          setComponentValue: function(value) {
+              window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value, dataType: "json"}, "*");
+          },
+          RENDER_EVENT: "streamlit:render",
+          events: {
+              addEventListener: function(type, callback) {
+                  window.addEventListener("message", function(event) {
+                      if (event.data && event.data.type === type) {
+                          callback(event);
+                      }
+                  });
+              }
+          }
+      };
+
+      let recognition;
+      let isBotSpeaking = false;
+
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        document.getElementById("mic-status").innerText = "Speech Recognition not supported in this browser.";
+        Streamlit.setFrameHeight(20);
+      } else {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-IN';
+        
+        let isRecognizing = false;
+
+        recognition.onstart = function() {
+          isRecognizing = true;
+          if (isBotSpeaking) {
+             recognition.stop();
+          } else {
+             document.getElementById("mic-status").innerText = "Listening... (Speak naturally)";
+             Streamlit.setFrameHeight(15); 
+          }
+        };
+
+        recognition.onresult = function(event) {
+          if (isBotSpeaking) return;
+          let newTranscript = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              newTranscript += event.results[i][0].transcript;
+            }
+          }
+          if (newTranscript.trim() !== "") {
+             let payload = {
+                 "text": newTranscript.trim(),
+                 "timestamp": new Date().getTime()
+             };
+             Streamlit.setComponentValue(payload);
+          }
+        };
+
+        recognition.onerror = function(event) {
+          if (event.error === 'not-allowed') {
+             document.getElementById("mic-status").innerText = "Microphone blocked by user.";
+          }
+        };
+
+        recognition.onend = function() {
+          isRecognizing = false;
+          if (!isBotSpeaking) {
+             setTimeout(() => { try { recognition.start(); } catch(e) {} }, 50);
+          } else {
+             document.getElementById("mic-status").innerText = "Bot is speaking... Muffled mic.";
+          }
+        };
+
+        let currentSpeakId = null;
+
+        function onDataFromPython(event) {
+          if (event.data.type !== "streamlit:render") return;
+          let args = event.data.args;
+          Streamlit.setFrameHeight(15); 
+          
+          if (args.language) {
+              recognition.lang = args.language;
+          }
+          
+          if (args.speak_id && args.speak_id !== currentSpeakId) {
+             currentSpeakId = args.speak_id;
+             let wc = args.word_count || 0;
+             if (wc > 0) {
+                 isBotSpeaking = true;
+                 recognition.stop();
+                 document.getElementById("mic-status").innerText = "Bot speaking... (Mic muted)";
+                 
+                 // Calculate estimated speaking time: ~350ms per word + 1.5s buffer
+                 setTimeout(() => {
+                     isBotSpeaking = false;
+                     document.getElementById("mic-status").innerText = "Listening... (Speak naturally)";
+                     setTimeout(() => { try { recognition.start(); } catch(e) {} }, 50);
+                 }, wc * 350 + 1500);
+             }
+          } else if (!isBotSpeaking && !isRecognizing) {
+             setTimeout(() => { try { recognition.start(); } catch(e) {} }, 50);
+          }
+        }
+
+        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onDataFromPython);
+        Streamlit.setComponentReady();
+      }
+    </script>
+  </body>
+</html>

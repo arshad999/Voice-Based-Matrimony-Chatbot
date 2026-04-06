@@ -4,8 +4,14 @@ from dotenv import load_dotenv
 import os
 import base64
 
+import streamlit.components.v1 as components
+import uuid
+
 from utils.prompts import GROOM_PROMPT, BRIDE_PROMPT
-from utils.llm import generate_audio, transcribe_audio, get_chatbot_response, get_chatbot_response_stream, extract_user_information
+from utils.llm import generate_audio, get_chatbot_response, get_chatbot_response_stream, extract_user_information
+
+# Declare the lightweight, continuous speech custom React/HTML component
+continuous_speech = components.declare_component("continuous_speech", path="components/continuous_speech")
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -88,6 +94,7 @@ with st.sidebar:
     if st.button("Start / Reset Call", use_container_width=True):
         st.session_state.history = []
         st.session_state.persona = persona
+        
         st.session_state.voice = "onyx" if persona == "Groom" else "nova"
         st.session_state.active_prompt = GROOM_PROMPT if persona == "Groom" else BRIDE_PROMPT
         
@@ -104,6 +111,9 @@ with st.sidebar:
                     "audio": intro_audio,
                     "autoplay": True
                 })
+                # Set muting parameters
+                st.session_state.bot_speak_id = str(uuid.uuid4())
+                st.session_state.bot_word_count = len(intro_text.split())
             except Exception as e:
                 st.error(f"Call failed: {e}")
         st.rerun()
@@ -161,57 +171,67 @@ else:
             st.markdown(f'<audio autoplay src="data:audio/mp3;base64,{b64_audio}"></audio>', unsafe_allow_html=True)
             msg["autoplay"] = False
 
-    # 4. Audio Input
-    if "audio_key" not in st.session_state:
-        st.session_state.audio_key = 0
-
+    # 4. Continuous Audio Input
     st.markdown("<br>", unsafe_allow_html=True)
-    audio_input = st.audio_input("Speak", key=f"audio_{st.session_state.audio_key}")
+    
+    speak_id = st.session_state.get("bot_speak_id", None)
+    word_count = st.session_state.get("bot_word_count", 0)
+    lang_code = st.session_state.get("lang_code", "en-IN")
+    
+    # Renders the hidden listening iframe with dynamic config
+    transcript_payload = continuous_speech(
+        speak_id=speak_id, 
+        word_count=word_count, 
+        language=lang_code,
+        key="continuous_voice"
+    )
 
-    if audio_input is not None:
-        with st.spinner("Transcribing..."):
-            try:
-                transcript = transcribe_audio(audio_input)
-            except Exception as e:
-                st.error(f"Error transcribing audio: {e}")
-                transcript = None
-        
-        if transcript:
-            st.session_state.history.append({"role": "user", "content": transcript})
+    transcript = None
+    if transcript_payload:
+        tid = transcript_payload.get("timestamp")
+        if tid != st.session_state.get("last_transcript_id"):
+            st.session_state["last_transcript_id"] = tid
+            transcript = transcript_payload.get("text")
+
+    if transcript:
+        st.session_state.history.append({"role": "user", "content": transcript})
             
-            try:
-                system_msg = [{"role": "system", "content": st.session_state.active_prompt}]
-                context = [{"role": m["role"], "content": m["content"]} for m in st.session_state.history]
-                messages = system_msg + context
-                
-                # Setup streaming visually into subtitles
-                stream = get_chatbot_response_stream(messages)
-                bot_response_text = ""
-                
-                for chunk in stream:
-                    # Depending on streaming object syntax
+        try:
+            system_msg = [{"role": "system", "content": st.session_state.active_prompt}]
+            context = [{"role": m["role"], "content": m["content"]} for m in st.session_state.history]
+            messages = system_msg + context
+            
+            # Setup streaming visually into subtitles
+            stream = get_chatbot_response_stream(messages)
+            bot_response_text = ""
+            
+            for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
                     content = chunk.choices[0].delta.content
                     if content:
                         bot_response_text += content
-                        subtitle_placeholder.markdown(f"""
-                        <div class="subtitle-container">
-                            <div class="subtitle-bot" style="color: #4CAF50;">"{bot_response_text}"</div>
-                            <div class="subtitle-user">You: {transcript}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                
-                with st.spinner("Synthesizing Voice..."):
-                    bot_audio = generate_audio(bot_response_text, st.session_state.voice)
-                
-                st.session_state.history.append({
-                    "role": "assistant",
-                    "content": bot_response_text,
-                    "audio": bot_audio,
-                    "autoplay": True
-                })
-                
-            except Exception as e:
-                st.error(f"Error generating AI response: {e}")
+                    subtitle_placeholder.markdown(f"""
+                    <div class="subtitle-container">
+                        <div class="subtitle-bot" style="color: #4CAF50;">"{bot_response_text}"</div>
+                        <div class="subtitle-user">You: {transcript}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
             
-            st.session_state.audio_key += 1
-            st.rerun()
+            with st.spinner("Synthesizing Voice..."):
+                bot_audio = generate_audio(bot_response_text, st.session_state.voice)
+            
+            st.session_state.history.append({
+                "role": "assistant",
+                "content": bot_response_text,
+                "audio": bot_audio,
+                "autoplay": True
+            })
+            
+            # Signal the frontend to mute
+            st.session_state.bot_speak_id = str(uuid.uuid4())
+            st.session_state.bot_word_count = len(bot_response_text.split())
+            
+        except Exception as e:
+            st.error(f"Error generating AI response: {e}")
+        
+        st.rerun()
