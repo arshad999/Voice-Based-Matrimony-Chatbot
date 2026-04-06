@@ -4,53 +4,72 @@ from .prompts import EXTRACT_PROMPT
 
 def generate_audio(text: str, voice: str) -> bytes:
     """Generate audio bytes using OpenAI TTS."""
-    response = openai.audio.speech.create(
-        model="tts-1",
-        voice=voice,
-        input=text
-    )
-    return response.content
+    try:
+        response = openai.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text
+        )
+        return response.content
+    except Exception as e:
+        print(f"Error in TTS generation: {e}")
+        return b""
 
 def transcribe_audio(audio_file) -> str:
     """Transcribe user audio to text using Whisper."""
-    response = openai.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file
-    )
-    return response.text
+    try:
+        response = openai.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file
+        )
+        return response.text
+    except Exception as e:
+        print(f"Error in transcription: {e}")
+        return ""
 
 def get_chatbot_response(messages: list) -> str:
     """Get the next chat response from gpt-4o."""
-    response = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=messages
-    )
-    return response.choices[0].message.content
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error in chat response: {e}")
+        return "I'm having a little trouble connecting. Could you repeat that?"
 
 def get_chatbot_response_stream(messages: list):
     """Get the next chat response from gpt-4o as a stream."""
-    response = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        stream=True
-    )
-    return response
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            stream=True
+        )
+        return response
+    except Exception as e:
+        print(f"Error in chat streaming: {e}")
+        return []
 
 def extract_user_information(history: list) -> dict:
     """Extract information from the chat history and return as a JSON dictionary."""
-    # format history for context
+    if not history:
+        return {}
+        
     context = [{"role": m["role"], "content": m["content"]} for m in history]
-    
     messages = [{"role": "system", "content": EXTRACT_PROMPT}] + context
     
-    response = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        response_format={"type": "json_object"}
-    )
-    
-    content = response.choices[0].message.content
     try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            response_format={"type": "json_object"}
+        )
+        content = response.choices[0].message.content
         return json.loads(content)
     except json.JSONDecodeError:
         return {"error": "Failed to parse JSON", "raw": content}
+    except Exception as e:
+        print(f"Error extracting information: {e}")
+        return {"error": str(e)}
